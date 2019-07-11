@@ -85,3 +85,5 @@ Note: This package does not actually require that OpenCV be installed on your sy
 ## References
 [1] A. Geiger, P. Lenz, C. Stiller, and R. Urtasun, "Vision meets robotics: The KITTI dataset," Int. J. Robot. Research (IJRR), vol. 32, no. 11, pp. 1231–1237, Sep. 2013. [http://www.cvlibs.net/datasets/kitti/](http://www.cvlibs.net/datasets/kitti/)
 `
+# kitti2bag
+Qcraft Version of kitti2bag. Support 6 cameras
