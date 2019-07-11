@@ -10,16 +10,19 @@ __author__ = "Lee Clement"
 __email__ = "lee.clement@robotics.utias.utoronto.ca"
 
 # Change this to the directory where you store KITTI data
-basedir = '/Users/leeclement/Desktop/KITTI/raw'
+basedir = '/home/qcraft/tmp'
+date = '2019_07_02'
+drive = '1153'
 
-# Specify the dataset to load
-date = '2011_09_30'
-drive = '0034'
-
+#basedir = '/home/qcraft/workspace/kitti'
+#date = '2011_09_26'
+#drive = '0064'
 # Load the data. Optionally, specify the frame range to load.
 # dataset = pykitti.raw(basedir, date, drive)
 dataset = pykitti.raw(basedir, date, drive, frames=range(0, 20, 5))
 
+dataset._load_oxts()
+print "load_oxts_ok"
 # dataset.calib:         Calibration data are accessible as a named tuple
 # dataset.timestamps:    Timestamps are parsed into a list of datetime objects
 # dataset.oxts:          List of OXTS packets and 6-dof poses as named tuples
@@ -52,29 +55,3 @@ print('\nRGB stereo pair baseline [m]: ' + str(dataset.calib.b_rgb))
 print('\nFirst timestamp: ' + str(dataset.timestamps[0]))
 print('\nSecond IMU pose:\n' + str(second_pose))
 
-f, ax = plt.subplots(2, 2, figsize=(15, 5))
-ax[0, 0].imshow(first_gray[0], cmap='gray')
-ax[0, 0].set_title('Left Gray Image (cam0)')
-
-ax[0, 1].imshow(first_cam1, cmap='gray')
-ax[0, 1].set_title('Right Gray Image (cam1)')
-
-ax[1, 0].imshow(first_cam2)
-ax[1, 0].set_title('Left RGB Image (cam2)')
-
-ax[1, 1].imshow(first_rgb[1])
-ax[1, 1].set_title('Right RGB Image (cam3)')
-
-
-f2 = plt.figure()
-ax2 = f2.add_subplot(111, projection='3d')
-# Plot every 100th point so things don't get too bogged down
-velo_range = range(0, third_velo.shape[0], 100)
-ax2.scatter(third_velo[velo_range, 0],
-            third_velo[velo_range, 1],
-            third_velo[velo_range, 2],
-            c=third_velo[velo_range, 3],
-            cmap='gray')
-ax2.set_title('Third Velodyne scan (subsampled)')
-
-plt.show()

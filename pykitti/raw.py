@@ -25,7 +25,7 @@ class raw:
         self.frames = kwargs.get('frames', None)
 
         # Default image file extension is '.png'
-        self.imtype = kwargs.get('imtype', 'png')
+        self.imtype = kwargs.get('imtype', 'jpg')
 
         # Find all the data files
         self._get_file_lists()
@@ -76,6 +76,25 @@ class raw:
         return utils.load_image(self.cam3_files[idx], mode='RGB')
 
     @property
+    def cam4(self):
+        """Generator to read image files for cam0 (RGB right)."""
+        return utils.yield_images(self.cam4_files, mode='RGB')
+
+    def get_cam4(self, idx):
+        """Read image file for cam4 (RGB right) at the specified index."""
+        return utils.load_image(self.cam4_files[idx], mode='RGB')
+
+
+    @property
+    def cam5(self):
+        """Generator to read image files for cam0 (RGB right)."""
+        return utils.yield_images(self.cam5_files, mode='RGB')
+
+    def get_cam5(self, idx):
+        """Read image file for cam4 (RGB right) at the specified index."""
+        return utils.load_image(self.cam5_files[idx], mode='RGB')
+
+    @property
     def gray(self):
         """Generator to read monochrome stereo pairs from file.
         """
@@ -122,6 +141,12 @@ class raw:
         self.cam3_files = sorted(glob.glob(
             os.path.join(self.data_path, 'image_03',
                          'data', '*.{}'.format(self.imtype))))
+        self.cam4_files = sorted(glob.glob(
+            os.path.join(self.data_path, 'image_04',
+                         'data', '*.{}'.format(self.imtype))))
+        self.cam5_files = sorted(glob.glob(
+            os.path.join(self.data_path, 'image_05',
+                         'data', '*.{}'.format(self.imtype))))
         self.velo_files = sorted(glob.glob(
             os.path.join(self.data_path, 'velodyne_points',
                          'data', '*.bin')))
@@ -138,6 +163,10 @@ class raw:
                 self.cam2_files, self.frames)
             self.cam3_files = utils.subselect_files(
                 self.cam3_files, self.frames)
+            self.cam4_files = utils.subselect_files(
+                self.cam4_files, self.frames)
+            self.cam5_files = utils.subselect_files(
+                self.cam5_files, self.frames)
             self.velo_files = utils.subselect_files(
                 self.velo_files, self.frames)
 
@@ -165,11 +194,15 @@ class raw:
         P_rect_10 = np.reshape(filedata['P_rect_01'], (3, 4))
         P_rect_20 = np.reshape(filedata['P_rect_02'], (3, 4))
         P_rect_30 = np.reshape(filedata['P_rect_03'], (3, 4))
+        P_rect_40 = np.reshape(filedata['P_rect_04'], (3, 4))
+        P_rect_50 = np.reshape(filedata['P_rect_05'], (3, 4))
 
         data['P_rect_00'] = P_rect_00
         data['P_rect_10'] = P_rect_10
         data['P_rect_20'] = P_rect_20
         data['P_rect_30'] = P_rect_30
+        data['P_rect_40'] = P_rect_40
+        data['P_rect_50'] = P_rect_50
 
         # Create 4x4 matrices from the rectifying rotation matrices
         R_rect_00 = np.eye(4)
@@ -180,11 +213,17 @@ class raw:
         R_rect_20[0:3, 0:3] = np.reshape(filedata['R_rect_02'], (3, 3))
         R_rect_30 = np.eye(4)
         R_rect_30[0:3, 0:3] = np.reshape(filedata['R_rect_03'], (3, 3))
+        R_rect_40 = np.eye(4)
+        R_rect_40[0:3, 0:3] = np.reshape(filedata['R_rect_04'], (3, 3))
+        R_rect_50 = np.eye(4)
+        R_rect_50[0:3, 0:3] = np.reshape(filedata['R_rect_05'], (3, 3))
 
         data['R_rect_00'] = R_rect_00
         data['R_rect_10'] = R_rect_10
         data['R_rect_20'] = R_rect_20
         data['R_rect_30'] = R_rect_30
+        data['R_rect_40'] = R_rect_40
+        data['R_rect_50'] = R_rect_50
 
         # Compute the rectified extrinsics from cam0 to camN
         T0 = np.eye(4)
@@ -195,18 +234,26 @@ class raw:
         T2[0, 3] = P_rect_20[0, 3] / P_rect_20[0, 0]
         T3 = np.eye(4)
         T3[0, 3] = P_rect_30[0, 3] / P_rect_30[0, 0]
+        T4 = np.eye(4)
+        T4[0, 3] = P_rect_40[0, 3] / P_rect_40[0, 0]
+        T5 = np.eye(4)
+        T5[0, 3] = P_rect_50[0, 3] / P_rect_50[0, 0]
 
         # Compute the velodyne to rectified camera coordinate transforms
         data['T_cam0_velo'] = T0.dot(R_rect_00.dot(T_cam0unrect_velo))
         data['T_cam1_velo'] = T1.dot(R_rect_00.dot(T_cam0unrect_velo))
         data['T_cam2_velo'] = T2.dot(R_rect_00.dot(T_cam0unrect_velo))
         data['T_cam3_velo'] = T3.dot(R_rect_00.dot(T_cam0unrect_velo))
+        data['T_cam4_velo'] = T4.dot(R_rect_00.dot(T_cam0unrect_velo))
+        data['T_cam5_velo'] = T5.dot(R_rect_00.dot(T_cam0unrect_velo))
 
         # Compute the camera intrinsics
         data['K_cam0'] = P_rect_00[0:3, 0:3]
         data['K_cam1'] = P_rect_10[0:3, 0:3]
         data['K_cam2'] = P_rect_20[0:3, 0:3]
         data['K_cam3'] = P_rect_30[0:3, 0:3]
+        data['K_cam4'] = P_rect_40[0:3, 0:3]
+        data['K_cam5'] = P_rect_50[0:3, 0:3]
 
         # Compute the stereo baselines in meters by projecting the origin of
         # each camera frame into the velodyne frame and computing the distances
@@ -216,6 +263,8 @@ class raw:
         p_velo1 = np.linalg.inv(data['T_cam1_velo']).dot(p_cam)
         p_velo2 = np.linalg.inv(data['T_cam2_velo']).dot(p_cam)
         p_velo3 = np.linalg.inv(data['T_cam3_velo']).dot(p_cam)
+        p_velo4 = np.linalg.inv(data['T_cam4_velo']).dot(p_cam)
+        p_velo5 = np.linalg.inv(data['T_cam5_velo']).dot(p_cam)
 
         data['b_gray'] = np.linalg.norm(p_velo1 - p_velo0)  # gray baseline
         data['b_rgb'] = np.linalg.norm(p_velo3 - p_velo2)   # rgb baseline
@@ -240,6 +289,8 @@ class raw:
         data['T_cam1_imu'] = data['T_cam1_velo'].dot(data['T_velo_imu'])
         data['T_cam2_imu'] = data['T_cam2_velo'].dot(data['T_velo_imu'])
         data['T_cam3_imu'] = data['T_cam3_velo'].dot(data['T_velo_imu'])
+        data['T_cam4_imu'] = data['T_cam4_velo'].dot(data['T_velo_imu'])
+        data['T_cam5_imu'] = data['T_cam5_velo'].dot(data['T_velo_imu'])
 
         self.calib = namedtuple('CalibData', data.keys())(*data.values())
 
