@@ -104,12 +104,13 @@ def save_dynamic_tf(bag, kitti, kitti_type, initial_time):
         
 def save_camera_data(bag, kitti_type, kitti, util, bridge, camera, camera_frame_id, topic, initial_time):
     print("Exporting camera {}".format(camera))
-    #print("Skiped....")
-    #return
     if kitti_type.find("raw") != -1:
         camera_pad = '{0:02d}'.format(camera)
         image_dir = os.path.join(kitti.data_path, 'image_{}'.format(camera_pad))
         image_path = os.path.join(image_dir, 'data')
+        if not os.path.exists(image_path):
+            print(image_path+" Not Exist...Skiped....")
+            return
         image_filenames = sorted(os.listdir(image_path))
         with open(os.path.join(image_dir, 'timestamps.txt')) as f:
             image_datetimes = map(lambda x: datetime.strptime(x[:-4], '%Y-%m-%d %H:%M:%S.%f'), f.readlines())
@@ -139,9 +140,11 @@ def save_camera_data(bag, kitti_type, kitti, util, bridge, camera, camera_frame_
         image_filename = os.path.join(image_path, filename)
         cv_image = cv2.imread(image_filename)
         calib.width, calib.height = cv_image.shape[:2]
-        if camera in (0, 1):
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-        encoding = "mono8" if camera in (0, 1) else "bgr8"
+        #instead conver camera 0,1 to grey, keep all 6 camera in color
+        #if camera in (0, 1):
+        #    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        #encoding = "mono8" if camera in (0, 1) else "bgr8"
+        encoding = "bgr8"
         image_message = bridge.cv2_to_imgmsg(cv_image, encoding=encoding)
         image_message.header.frame_id = camera_frame_id
         if kitti_type.find("raw") != -1:
@@ -158,6 +161,9 @@ def save_velo_data(bag, kitti, velo_frame_id, topic):
     print("Exporting velodyne data")
     velo_path = os.path.join(kitti.data_path, 'velodyne_points')
     velo_data_dir = os.path.join(velo_path, 'data')
+    if not os.path.exists(velo_data_dir):
+        print("No velo data available...skiped....")
+        return
     velo_filenames = sorted(os.listdir(velo_data_dir))
     with open(os.path.join(velo_path, 'timestamps.txt')) as f:
         lines = f.readlines()
@@ -264,16 +270,16 @@ def main():
     
     parser = argparse.ArgumentParser(description = "Convert KITTI dataset to ROS bag file the easy way!")
     # Accepted argument values
-    kitti_types = ["raw_synced", "odom_color", "odom_gray"]
+    kitti_types = ["raw_synced", "odom_color", "odom_gray", "camera"]
     odometry_sequences = []
     for s in range(22):
         odometry_sequences.append(str(s).zfill(2))
     
-    parser.add_argument("kitti_type", choices = kitti_types, help = "KITTI dataset type")
+    parser.add_argument("kitti_type", choices = kitti_types,default=kitti_types[0], help = "KITTI dataset type")
     parser.add_argument("dir", nargs = "?", default = os.getcwd(), help = "base directory of the dataset, if no directory passed the deafult is current working directory")
     parser.add_argument("-t", "--date", help = "date of the raw dataset (i.e. 2011_09_26), option is only for RAW datasets.")
     parser.add_argument("-r", "--drive", help = "drive number of the raw dataset (i.e. 0001), option is only for RAW datasets.")
-    parser.add_argument("-s", "--sequence", choices = odometry_sequences,help = "sequence of the odometry dataset (between 00 - 21), option is only for ODOMETRY datasets.")
+    #parser.add_argument("-s", "--sequence", choices = odometry_sequences,help = "sequence of the odometry dataset (between 00 - 21), option is only for ODOMETRY datasets.")
     args = parser.parse_args()
 
     bridge = CvBridge()
@@ -288,7 +294,8 @@ def main():
         (2, 'camera_color_front_right', '/kitti/camera_color_front_right'),
         (3, 'camera_color_rear_right',  '/kitti/camera_color_rear_right'),
         (4, 'camera_color_rear',        '/kitti/camera_color_rear'),
-        (5, 'camera_color_rear_left',   '/kitti/camera_color_rear_left')
+        (5, 'camera_color_rear_left',   '/kitti/camera_color_rear_left'),
+        (6, 'camera_color_front_dim',   '/kitti/camera_color_front_dim')
     ]
 
     if args.kitti_type.find("raw") != -1:
@@ -333,7 +340,8 @@ def main():
                 (imu_frame_id, cameras[2][1], inv(kitti.calib.T_cam2_imu)),
                 (imu_frame_id, cameras[3][1], inv(kitti.calib.T_cam3_imu)),
                 (imu_frame_id, cameras[4][1], inv(kitti.calib.T_cam4_imu)),
-                (imu_frame_id, cameras[5][1], inv(kitti.calib.T_cam5_imu))
+                (imu_frame_id, cameras[5][1], inv(kitti.calib.T_cam5_imu)),
+                (imu_frame_id, cameras[6][1], inv(kitti.calib.T_cam6_imu))
             ]
 
             util = pykitti.utils.read_calib_file(os.path.join(kitti.calib_path, 'calib_cam_to_cam.txt'))
@@ -353,6 +361,42 @@ def main():
             print(bag)
             bag.close()
             
+    elif args.kitti_type.find("camera") != -1:
+        bag = rosbag.Bag("kitti_{}_drive_{}_{}.bag".format("_", "_", "_"), 'w', compression=compression)
+        #kitti = pykitti.raw(args.dir, args.date, args.drive)
+        if not os.path.exists(args.dir):
+            print('Path {} does not exists. Exiting.'.format(args.dir))
+            sys.exit(1)
+        image_filenames = sorted(os.listdir(args.dir))
+            
+        camera_frame_id  ='camera_color_front'
+        topic = '/kitti/camera_color_front'
+    
+        calib = CameraInfo()
+        calib.header.frame_id = camera_frame_id
+
+        bar = progressbar.ProgressBar()
+        dt = 0.0
+        print(args.dir)
+        for filename in bar(image_filenames):
+            image_filename = os.path.join(args.dir, filename)
+            #print(image_filename)
+            cv_image = cv2.imread(image_filename)
+            calib.width, calib.height = cv_image.shape[:2]
+            #instead conver camera 0,1 to grey, keep all 6 camera in color
+            #if camera in (0, 1):
+            #    cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+            #encoding = "mono8" if camera in (0, 1) else "bgr8"
+
+            encoding = "bgr8"
+            image_message = bridge.cv2_to_imgmsg(cv_image, encoding=encoding)
+            image_message.header.frame_id = camera_frame_id
+            image_message.header.stamp = rospy.Time.from_sec(float(dt))
+            topic_ext = "/image_raw"
+            calib.header.stamp = image_message.header.stamp
+            bag.write(topic + topic_ext, image_message, t = image_message.header.stamp)
+            bag.write(topic + '/camera_info', calib, t = calib.header.stamp) 
+            dt += 0.1
     elif args.kitti_type.find("odom") != -1:
         
         if args.sequence == None:
