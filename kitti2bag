@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import json
 
 try:
     import pykitti
@@ -9,21 +10,31 @@ except ImportError as e:
     print('Could not load module \'pykitti\'. Please run `pip install pykitti`')
     sys.exit(1)
 
-import tf
+try:
+    import tf
+except ImportError as e:
+    print('Could not load module \'tf\'. Please make sure ROS is installed and run `source /opt/ros/melodic/setup.bash`')
+    sys.exit(1)
 import os
 import cv2
 import rospy
 import rosbag
-import progressbar
+try:
+    import progressbar
+except ImportError as e:
+    print('Could not load module \'progressbar\'. Please run `pip install progressbar`')
+    sys.exit(1)
 from tf2_msgs.msg import TFMessage
 from datetime import datetime
-from std_msgs.msg import Header
+from std_msgs.msg import Header, ColorRGBA
 from sensor_msgs.msg import CameraInfo, Imu, PointField, NavSatFix
 import sensor_msgs.point_cloud2 as pcl2
-from geometry_msgs.msg import TransformStamped, TwistStamped, Transform
+from geometry_msgs.msg import TransformStamped, TwistStamped, Transform, Pose, Vector3, Point
 from cv_bridge import CvBridge
 import numpy as np
 import argparse
+from visualization_msgs.msg import Marker, MarkerArray
+
 
 def save_imu_data(bag, kitti, imu_frame_id, topic):
     print("Exporting IMU")
@@ -157,6 +168,134 @@ def save_camera_data(bag, kitti_type, kitti, util, bridge, camera, camera_frame_
         bag.write(topic + topic_ext, image_message, t = image_message.header.stamp)
         bag.write(topic + '/camera_info', calib, t = calib.header.stamp) 
         
+def save_marker_data(bag, kitti, marker_frame_id, topic):
+    print("Exporting Marker data")
+    marker_path = os.path.join(kitti.data_path, 'objects')
+    marker_data_dir = os.path.join(marker_path, 'data')
+    if not os.path.exists(marker_data_dir):
+        print("No marker data available...skiped....")
+        return
+    marker_filenames = sorted(os.listdir(marker_data_dir))
+    with open(os.path.join(marker_path, 'timestamps.txt')) as f:
+        lines = f.readlines()
+        marker_datetimes = []
+        for line in lines:
+            if len(line) == 1:
+                continue
+            dt = datetime.strptime(line[:-4], '%Y-%m-%d %H:%M:%S.%f')
+            marker_datetimes.append(dt)
+
+    iterable = zip(marker_datetimes, marker_filenames)
+    bar = progressbar.ProgressBar()
+
+    redColor = ColorRGBA(r=1,a=1)
+    blueColor = ColorRGBA(b=1,a=1)
+    greenColor = ColorRGBA(g=1,a=1)
+    orangeColor = ColorRGBA(r=1,g=0.5,b=0,a=1)
+    forestgreenColor = ColorRGBA(r=34/255.0,g=139/255.0,b=34/255.0,a=1)
+    yellowColor = ColorRGBA(r=1,g=1,a=1)
+    deeppinkColor = ColorRGBA(r=255/255.0,g=20/255.0,b=147/255.0,a=1)
+    for dt, filename in bar(iterable):
+        if dt is None:
+            continue
+
+        marker_filename = os.path.join(marker_data_dir, filename)
+
+        # read json data
+        with open(marker_filename) as f:
+            print marker_filename
+            data = json.load(f)
+
+            # create header
+            header = Header()
+            header.frame_id = marker_frame_id
+            header.stamp = rospy.Time.from_sec(float(datetime.strftime(dt, "%s.%f")))
+
+            marker_array = MarkerArray()
+            contour_array = MarkerArray()
+            # create marker visualization
+            for index,obj in enumerate(data):
+                x,y,w,h = obj['x'],obj['y'],obj['width'],obj['length']
+                if obj['type'] == "OT_VEHICLE":
+                    marker_color = yellowColor
+                elif obj['type'] == "OT_PEDESTRIAN":
+                    marker_color = greenColor
+                elif obj['type'] == "OT_CYCLIST":
+                    marker_color = blueColor
+                elif obj['type'] == "OT_MOTORCYCLIST":
+                    marker_color = yellowColor
+                elif obj['type'] == "OT_FOD":
+                    marker_color = deeppinkColor
+                elif obj['type'] == "OT_VEGETATION":
+                    marker_color = forestgreenColor
+                else:
+                    marker_color = ColorRGBA(r=1,g=1,a=1)
+
+
+                pose = Pose()
+                pose.position.x = x
+                pose.position.y = y
+                pose.position.z = 0
+                pose.orientation.x = 0.0
+                pose.orientation.y = 0.0
+                pose.orientation.z = obj['yaw']/3.1415# + (90.0/180.0)*3.1415
+                pose.orientation.w = 1.0
+                marker = Marker(header=header,                   
+                                  pose=pose,
+                                  type=Marker().SPHERE,
+                                  scale=Vector3(w*0.5,w*0.5,1.1),
+                                  id=index,
+                                  color=marker_color)
+                marker_array.markers.append(marker)
+                #draw contour & Parking Sign
+                try:
+                    contour = obj['contour']
+                    line_list = Marker()
+                    line_list.header = header
+                    line_list.scale=Vector3(0.3,0,0)
+                    line_list.id = index+10000
+                    line_list.color = marker_color
+                    line_list.type = Marker().LINE_LIST
+                    for pre,curr in zip(contour, contour[1:]):
+                        p1 = Point()
+                        p2 = Point()
+                        p1.x,p1.y,p1.z = pre['x'],pre['y'],0
+                        p2.x,p2.y,p2.z = curr['x'],curr['y'],0
+                        #print(p1,p2)
+                        line_list.points.append(p1)
+                        line_list.points.append(p2)
+
+                    #adding first and last element to close the gap
+                    p1 = Point()
+                    p2 = Point()
+                    p1.x,p1.y,p1.z = contour[0]['x'],contour[0]['y'],0
+                    p2.x,p2.y,p2.z = contour[-1]['x'],contour[-1]['y'],0
+                    line_list.points.append(p1)
+                    line_list.points.append(p2)
+
+                        #print(ctx,cty)
+                    contour_array.markers.append(line_list)
+
+                    #draw parked sign
+                    if obj['parked'] == 1:
+                        parked = Marker()
+                        parked.header = header
+                        parked.scale=Vector3(0,0,1.5)
+                        parked.id = index+20000
+                        parked.color = blueColor 
+                        parked.type = Marker().TEXT_VIEW_FACING
+                        parked.pose = pose
+                        parked.text = "P"
+                        contour_array.markers.append(parked)
+                except:
+                    print("Error")
+                    pass
+
+            bag.write(topic , marker_array, t=header.stamp)
+            bag.write("/contour_marker" , contour_array, t=header.stamp)
+
+
+
 def save_velo_data(bag, kitti, velo_frame_id, topic):
     print("Exporting velodyne data")
     velo_path = os.path.join(kitti.data_path, 'velodyne_points')
@@ -327,6 +466,8 @@ def main():
             gps_vel_topic = '/kitti/oxts/gps/vel'
             velo_frame_id = 'velo_link'
             velo_topic = '/kitti/velo'
+            marker_topic = '/visual_marker'
+            marker_frame_id = 'velo_link'
 
             T_base_link_to_imu = np.eye(4, 4)
             T_base_link_to_imu[0:3, 3] = [-4.933/2.0-1.043, 0, 0.93]
@@ -355,6 +496,7 @@ def main():
             for camera in cameras:
                 save_camera_data(bag, args.kitti_type, kitti, util, bridge, camera=camera[0], camera_frame_id=camera[1], topic=camera[2], initial_time=None)
             save_velo_data(bag, kitti, velo_frame_id, velo_topic)
+            save_marker_data(bag, kitti, marker_frame_id, marker_topic)
 
         finally:
             print("## OVERVIEW ##")
